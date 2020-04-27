@@ -365,6 +365,12 @@ function esx (components = {}) {
     if (recompile) meta.recompile = false
     const el = new EsxElement(item, tmpl, values)
     if (!(parent in el.props)) el.props[parent] = item
+    if(!el[ns]) {
+      el[ns] = {
+        tmpl,
+        values
+      }
+    }
     return el
   }
 
@@ -443,8 +449,19 @@ function esx (components = {}) {
 
 function renderComponent (item, values) {
   hooks.rendering(item)
-  const [tag, props, childMap, meta] = item
-  try { props[parent] = item } catch (e) {} // try/catch is for dev scenarios where object is frozen
+  const [tag, propsOrig, childMap, meta] = item
+  try { propsOrig[parent] = item } catch (e) {} // try/catch is for dev scenarios where object is frozen
+  let props = Object.assign({}, propsOrig)
+  if (tag.name === "Provider") {
+    if(!tag.contextType && tag.propTypes) {
+      tag.contextType = {
+        [provider]: [
+          null,
+          {value: tag.propTypes.context}
+        ]
+      }
+    }
+  }
   if (tag.$$typeof === REACT_PROVIDER_TYPE) {
     for (const p in meta.dynAttrs) {
       if (p === 'children') {
@@ -460,6 +477,18 @@ function renderComponent (item, values) {
   }
 
   const { dynAttrs, dynChildren } = meta
+  function replaceEsxMarker(o) {
+    for (let key in o) {
+      if(o[key] === marker) {
+        if(values[dynAttrs[key]] !== undefined) {
+          o[key] = values[dynAttrs[key]];
+        }
+      }
+    }
+    return o;
+  }
+  item[1] = replaceEsxMarker(item[1]);
+  item[3].attributes = replaceEsxMarker(item[3].attributes)
   if (values) {
     for (const p in dynAttrs) {
       if (p[0] === '…') {
@@ -520,9 +549,12 @@ function renderComponent (item, values) {
     if (meta.hooksUsed) hooks.after(item)
     return result
   }
+  if(!props.context) {
+    props.context = context
+  }
   const result = tag(props, context)
   if (meta.hooksUsed) hooks.after(item)
-  return result
+  return result;
 }
 
 function childPropsGetter () {
@@ -925,6 +957,7 @@ function compileTmpl (body, state) {
 
 function compileChildTmpl (item, tree) {
   const meta = item[3]
+  item[2] = []; /* Clear out esx.markers for children*/
   const { openTagStart, openTagEnd, selfClosing, closeTagEnd, attrPos } = meta
   const to = selfClosing ? openTagEnd[0] : closeTagEnd[0]
   const from = openTagStart[0]
